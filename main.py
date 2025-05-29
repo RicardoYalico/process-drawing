@@ -718,7 +718,69 @@ class Connector(QGraphicsItem):
                 self.end_item = items_by_id[end_item_id]
         self.update()
 
-    def get_line_endpoints_scene(self):
+    def _get_intersection_with_boundary(self, line_to_center: QLineF, item: DiagramItem) -> QPointF:
+        """Calcula el punto de intersección de la línea con el boundingRect del ítem."""
+        if not item or line_to_center.length() == 0:
+            return line_to_center.p2() 
+
+        item_rect_local = item.boundingRect() 
+        item_scene_poly = item.mapToScene(item_rect_local) 
+        item_scene_rect = item_scene_poly.boundingRect()
+
+
+        sides = [
+            QLineF(item_scene_rect.topLeft(), item_scene_rect.topRight()),
+            QLineF(item_scene_rect.topRight(), item_scene_rect.bottomRight()),
+            QLineF(item_scene_rect.bottomRight(), item_scene_rect.bottomLeft()),
+            QLineF(item_scene_rect.bottomLeft(), item_scene_rect.topLeft())
+        ]
+
+        closest_intersection = line_to_center.p2() 
+        min_dist_sq = float('inf')
+
+        for side in sides:
+            intersect_type, intersection_point = line_to_center.intersects(side)
+            if intersect_type == QLineF.BoundedIntersection:
+                # CORRECCIÓN: Usar .length() * .length() en lugar de .lengthSquared()
+                current_dist_line = QLineF(line_to_center.p1(), intersection_point)
+                current_dist_sq = current_dist_line.length() * current_dist_line.length()
+                if current_dist_sq < min_dist_sq:
+                    line_vec = line_to_center.unitVector()
+                    p1_to_intersect_vec = intersection_point - line_to_center.p1()
+                    dot_product = QPointF.dotProduct(QPointF(line_vec.dx(), line_vec.dy()), p1_to_intersect_vec)
+                    
+                    if dot_product >= -1e-6 : 
+                        min_dist_sq = current_dist_sq
+                        closest_intersection = intersection_point
+        
+        return closest_intersection
+
+
+    def _calculate_adjusted_endpoints(self):
+        p1_center = self.start_item.mapToScene(self.start_item.boundingRect().center())
+        p2_center = self.end_item.mapToScene(self.end_item.boundingRect().center())
+
+        if self._dragging_end == 'start' and self._current_drag_pos:
+            p1_center = self._current_drag_pos
+        if self._dragging_end == 'end' and self._current_drag_pos:
+            p2_center = self._current_drag_pos
+        
+        line_start_to_end = QLineF(p1_center, p2_center)
+        line_end_to_start = QLineF(p2_center, p1_center)
+
+        p1_adjusted = p1_center
+        p2_adjusted = p2_center
+
+        if self.start_item and not (self._dragging_end == 'start' and self._current_drag_pos):
+            p1_adjusted = self._get_intersection_with_boundary(line_end_to_start, self.start_item)
+        
+        if self.end_item and not (self._dragging_end == 'end' and self._current_drag_pos):
+            p2_adjusted = self._get_intersection_with_boundary(line_start_to_end, self.end_item)
+            
+        return p1_adjusted, p2_adjusted
+
+
+    def get_line_endpoints_scene(self): 
         p1, p2 = None, None
         if self.start_item:
             p1 = self.start_item.mapToScene(self.start_item.boundingRect().center())
@@ -737,7 +799,7 @@ class Connector(QGraphicsItem):
 
     def shape(self):
         path = QPainterPath()
-        p1_scene, p2_scene = self.get_line_endpoints_scene()
+        p1_scene, p2_scene = self._calculate_adjusted_endpoints() 
         
         if p1_scene is None or p2_scene is None: 
             return path 
@@ -759,7 +821,7 @@ class Connector(QGraphicsItem):
         return stroked_path
 
     def boundingRect(self):
-        p1_scene, p2_scene = self.get_line_endpoints_scene()
+        p1_scene, p2_scene = self._calculate_adjusted_endpoints() 
         if p1_scene is None or p2_scene is None:
             return QRectF()
         
@@ -784,7 +846,7 @@ class Connector(QGraphicsItem):
 
 
     def paint(self, painter, option, widget=None):
-        p1_scene, p2_scene = self.get_line_endpoints_scene()
+        p1_scene, p2_scene = self._calculate_adjusted_endpoints()
 
         if not (p1_scene and p2_scene): 
             return
@@ -824,12 +886,13 @@ class Connector(QGraphicsItem):
         if not (self._dragging_end == 'end' and self._current_drag_pos): 
             if line_local.length() > self.arrow_size: 
                 angle_rad = math.atan2(-line_local.dy(), line_local.dx()) 
-                arrow_p0 = line_local.p2() 
-                arrow_p1 = arrow_p0 - QPointF(math.cos(angle_rad + math.pi / 6.0) * self.arrow_size,
+                arrow_tip_point = line_local.p2() 
+
+                arrow_p1 = arrow_tip_point - QPointF(math.cos(angle_rad + math.pi / 6.0) * self.arrow_size,
                                             -math.sin(angle_rad + math.pi / 6.0) * self.arrow_size) 
-                arrow_p2 = arrow_p0 - QPointF(math.cos(angle_rad - math.pi / 6.0) * self.arrow_size,
+                arrow_p2_actual = arrow_tip_point - QPointF(math.cos(angle_rad - math.pi / 6.0) * self.arrow_size,
                                             -math.sin(angle_rad - math.pi / 6.0) * self.arrow_size)
-                arrow_head = QPolygonF([arrow_p0, arrow_p1, arrow_p2])
+                arrow_head = QPolygonF([arrow_tip_point, arrow_p1, arrow_p2_actual])
                 painter.setBrush(QBrush(self.line_color))
                 painter.drawPolygon(arrow_head)
         
@@ -844,7 +907,7 @@ class Connector(QGraphicsItem):
         self.update() 
 
     def get_point_at_event(self, event_pos_local: QPointF):
-        p1_scene, p2_scene = self.get_line_endpoints_scene()
+        p1_scene, p2_scene = self._calculate_adjusted_endpoints() 
         if p1_scene is None or p2_scene is None: return None
 
         p1_local = self.mapFromScene(p1_scene)
@@ -1049,13 +1112,30 @@ class DiagramScene(QGraphicsScene):
             del self.items_by_id[item.id]
             
     def clear(self):
+        if self.parent() and hasattr(self.parent(), 'on_diagram_modified'):
+            try:
+                self.item_added.disconnect()
+                self.item_removed.disconnect()
+            except TypeError: 
+                pass
+
         items_to_delete = list(self.items())
         for item in items_to_delete:
-            self.removeItem(item) 
+            if item.scene() == self: 
+                self.removeItem(item) 
+        
         self.items_by_id.clear()
         self.active_container_id = None
         self.next_item_id_counter = 1
         self.update_all_items_visibility() 
+
+        if self.parent() and hasattr(self.parent(), 'on_diagram_modified'):
+            self.item_added.connect(lambda item: self.parent().on_diagram_modified(action_description=f"Añadir {getattr(item, 'item_type', 'elemento')}"))
+            self.item_removed.connect(
+                lambda item: self.parent().on_diagram_modified(
+                    action_description=f"Eliminar {getattr(item, 'item_type', type(item).__name__)}"
+                ) if isinstance(item, (DiagramItem, Connector)) else None
+            )
 
 
     def add_diagram_item(self, item_type_str, position: QPointF, item_data=None):
@@ -1583,7 +1663,7 @@ class ItemPalette(QListWidget):
                 preview_width = rect_area.width() * 0.9 
                 preview_height = rect_area.height() * 0.9
                 
-                original_item_width = temp_item_instance.width
+                original_item_width = temp_item_instance.width 
                 original_item_height = temp_item_instance.height
 
                 item_aspect_ratio = original_item_width / original_item_height if original_item_height > 0 else 1
@@ -1668,7 +1748,7 @@ class DiagramApp(QMainWindow):
         self._history_current_index = -1 
         self.is_viewing_history = False 
         self._current_work_state_before_history_view = None 
-        self._viewing_history_list_index = -1 # Índice del ítem del historial que se está viendo
+        self._viewing_history_list_index = -1 
 
 
         main_v_layout = QVBoxLayout()
@@ -1849,17 +1929,28 @@ class DiagramApp(QMainWindow):
         self.search_palette_input.textChanged.connect(self.palette.filter_items) 
 
         self.scene.item_added.connect(lambda item: self.on_diagram_modified(action_description=f"Añadir {getattr(item, 'item_type', 'elemento')}"))
-        self.scene.item_removed.connect(
-            lambda item: self.on_diagram_modified(
-                action_description=f"Eliminar {getattr(item, 'item_type', type(item).__name__)}"
-            ) if isinstance(item, (DiagramItem, Connector)) else None 
-        )
+        self.scene.item_removed.connect(self.handle_item_removed_for_history) 
         self.scene.items_visibility_changed.connect(self.update_navigation_buttons)
         self.scene.item_selected.connect(self.update_preview_panel_if_container) 
 
-        # self.preview_zoom_in_button.clicked.connect(lambda: self.preview_view.scale(1.2, 1.2)) # Vista previa eliminada
-        # self.preview_zoom_out_button.clicked.connect(lambda: self.preview_view.scale(1/1.2, 1/1.2))
-        # self.preview_zoom_fit_button.clicked.connect(self.fit_preview_in_view)
+
+    def handle_item_removed_for_history(self, item):
+        """Manejador para la señal item_removed, para construir una descripción segura."""
+        if isinstance(item, (DiagramItem, Connector)):
+            item_type_desc = getattr(item, 'item_type', type(item).__name__)
+            item_id_desc = getattr(item, 'id', 'N/A')
+            text_desc = ""
+            if hasattr(item, 'properties') and 'text' in item.properties:
+                text_desc = item.properties['text']
+            elif hasattr(item, 'text') and item.text: # Para conectores
+                 text_desc = item.text
+            
+            description = f"Eliminar {item_type_desc}"
+            if text_desc:
+                description += f" '{text_desc}'"
+            description += f" (ID:{item_id_desc})"
+            self.on_diagram_modified(action_description=description)
+        # No hacer nada para otros tipos de QGraphicsItem como la línea de conexión temporal
 
 
     def toggle_grid(self, checked):
@@ -1947,7 +2038,7 @@ class DiagramApp(QMainWindow):
             }
         }
 
-    def _load_scene_from_data(self, data_dict, for_history_view=False): # Añadido for_history_view
+    def _load_scene_from_data(self, data_dict, for_history_view=False): 
         """Carga la escena desde un diccionario de datos."""
         target_scene = self.scene 
         
@@ -2018,7 +2109,7 @@ class DiagramApp(QMainWindow):
         target_scene.update_all_items_visibility() 
         if not for_history_view:
             self.update_navigation_buttons() 
-            self.update_preview_panel_if_container(None, False) # CORRECCIÓN: Llamar al método correcto
+            self.update_preview_panel_if_container(None, False) 
 
 
     def save_file_data(self, path):
@@ -2461,18 +2552,16 @@ class DiagramApp(QMainWindow):
             QMessageBox.warning(self, "Error al Exportar", f"No se pudo guardar la imagen en:\n{file_path}")
 
     def update_preview_panel_if_container(self, selected_item, is_selected):
-        # Este método ya no se usa para la vista previa del contenedor,
-        # ya que la vista previa del historial se maneja en la escena principal.
-        # Mantenerlo vacío o eliminarlo si no hay otras dependencias.
+        # Este método está obsoleto ya que la vista previa se eliminó.
         pass
 
     def populate_preview_scene(self, container_item: ContainerItem):
-        # Obsoleto, la vista previa usa la escena principal.
+        # Obsoleto
         pass
 
 
     def fit_preview_in_view(self):
-        # Obsoleto.
+        # Obsoleto
         pass
 
     def _capture_history_state(self, description="Cambio"):
@@ -2532,11 +2621,8 @@ class DiagramApp(QMainWindow):
                 list_item.setForeground(QColor("blue")) 
             self.history_list_widget.addItem(list_item)
         
-        # Scroll al ítem apropiado
         idx_to_scroll = self._viewing_history_list_index if self.is_viewing_history else self._history_current_index
         if idx_to_scroll >= 0:
-            # Necesitamos encontrar el QListWidgetItem real que corresponde al índice del historial
-            # ya que los separadores de hora no tienen UserRole.
             actual_list_widget_item_to_scroll = None
             for list_idx in range(self.history_list_widget.count()):
                 lw_item = self.history_list_widget.item(list_idx)
@@ -2557,7 +2643,7 @@ class DiagramApp(QMainWindow):
             self._current_work_state_before_history_view = self._get_current_scene_data()
         
         self.is_viewing_history = True
-        self._viewing_history_list_index = history_index # Guardar el índice que se está viendo
+        self._viewing_history_list_index = history_index 
         self.exit_history_view_button.setEnabled(True)
         
         timestamp, desc, state_json_to_view = self._history_stack[history_index]
@@ -2566,7 +2652,7 @@ class DiagramApp(QMainWindow):
         self._load_scene_from_data(data_to_view, for_history_view=True) 
         self.set_main_view_read_only(True) 
         self.update_title() 
-        self._update_history_list_widget() # Para actualizar el resaltado
+        self._update_history_list_widget() 
 
 
     def restore_history_state_from_list(self, list_item_clicked: QListWidgetItem):
@@ -2586,7 +2672,7 @@ class DiagramApp(QMainWindow):
         self._update_history_list_widget()
         print(f"Restaurado estado de: {timestamp} - {desc} como estado actual.")
 
-    def exit_history_view_mode(self, capture_new_state=True): # capture_new_state no se usa aquí
+    def exit_history_view_mode(self, capture_new_state=True): 
         if self.is_viewing_history:
             if self._current_work_state_before_history_view:
                 self._load_scene_from_data(self._current_work_state_before_history_view)
@@ -2597,7 +2683,7 @@ class DiagramApp(QMainWindow):
                      self._load_scene_from_data(json.loads(last_real_state_json))
 
             self.is_viewing_history = False
-            self._viewing_history_list_index = -1 # Resetear índice de vista
+            self._viewing_history_list_index = -1 
             self.exit_history_view_button.setEnabled(False)
             self.set_main_view_read_only(False)
             self.update_title()
@@ -2615,8 +2701,6 @@ class DiagramApp(QMainWindow):
         for item in self.scene.items():
             if isinstance(item, DiagramItem) or isinstance(item, Connector):
                 item.setFlag(QGraphicsItem.ItemIsMovable, not read_only)
-                item.setFlag(QGraphicsItem.ItemIsSelectable, not read_only) # Permitir selección para ver propiedades
-                # La edición por doble clic se controla dentro de los métodos mouseDoubleClickEvent
 
         print(f"Modo Solo Lectura de Escena Principal: {read_only}")
 
