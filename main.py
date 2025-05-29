@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialog, QInputDialog, QGraphicsPolygonItem, QGraphicsLineItem,
     QFormLayout, QLineEdit, QSpinBox, QDialogButtonBox, QTextEdit, 
     QGraphicsSceneMouseEvent, QGraphicsSceneHoverEvent, QSizePolicy, QDockWidget,
-    QAbstractItemView 
+    QAbstractItemView, QTreeWidget, QTreeWidgetItem, QMenu # Añadidos para jerarquía y menú contextual
 )
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont, QPolygonF, 
                          QTransform, QDrag, QIcon, QPixmap, QFontMetrics, 
@@ -102,6 +102,7 @@ class DiagramItem(QGraphicsItem):
             "id": getattr(self, 'id', None) if not for_clipboard else None, 
             "x": self.x(),
             "y": self.y(),
+            "z": self.zValue(), # Guardar Z-value
             "width": self.width,
             "height": self.height,
             "properties": self.properties.copy(), 
@@ -119,6 +120,8 @@ class DiagramItem(QGraphicsItem):
     def set_properties(self, data):
         if "x" in data and "y" in data: 
             self.setPos(data["x"], data["y"])
+        if "z" in data: # Cargar Z-value
+            self.setZValue(float(data["z"]))
         
         self.width = float(data.get("width", self.width)) 
         self.height = float(data.get("height", self.height)) 
@@ -739,11 +742,12 @@ class Connector(QGraphicsItem):
         min_dist_sq = float('inf')
 
         for side in sides:
-            intersect_type, intersection_point = line_to_center.intersects(side)
+            intersection_point = QPointF() # Necesario para Qt 5.15+
+            intersect_type = line_to_center.intersect(side, intersection_point) # Modificado
+            
             if intersect_type == QLineF.BoundedIntersection:
-                # CORRECCIÓN: Usar .length() * .length() en lugar de .lengthSquared()
                 current_dist_line = QLineF(line_to_center.p1(), intersection_point)
-                current_dist_sq = current_dist_line.length() * current_dist_line.length()
+                current_dist_sq = current_dist_line.length() * current_dist_line.length() # CORRECCIÓN
                 if current_dist_sq < min_dist_sq:
                     line_vec = line_to_center.unitVector()
                     p1_to_intersect_vec = intersection_point - line_to_center.p1()
@@ -1774,12 +1778,14 @@ class DiagramApp(QMainWindow):
         palette_v_layout.addWidget(self.palette, 1) 
         palette_v_layout.addWidget(self.up_level_button, 0) 
 
+        self.palette_dock = QDockWidget("Paleta de Ítems", self)
         palette_widget = QWidget()
         palette_widget.setLayout(palette_v_layout)
-        palette_widget.setFixedWidth(250) 
+        self.palette_dock.setWidget(palette_widget)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
 
-        top_h_layout.addWidget(palette_widget)
-        top_h_layout.addWidget(self.view, 1) 
+
+        top_h_layout.addWidget(self.view, 1) # Vista principal ocupa el espacio restante
 
         main_v_layout.addLayout(top_h_layout) 
 
@@ -1902,6 +1908,9 @@ class DiagramApp(QMainWindow):
         self.toggle_grid_action.setChecked(self.scene.draw_grid)
         view_menu.addAction(self.toggle_grid_action)
         view_menu.addSeparator()
+        toggle_palette_action = self.palette_dock.toggleViewAction() # Acción para paleta
+        toggle_palette_action.setText("Mostrar/Ocultar Paleta")
+        view_menu.addAction(toggle_palette_action)
         toggle_history_action = self.history_dock.toggleViewAction() 
         toggle_history_action.setText("Mostrar/Ocultar Historial")
         view_menu.addAction(toggle_history_action)
@@ -2733,4 +2742,6 @@ if __name__ == '__main__':
     main_win = DiagramApp() 
     main_win.show()
     sys.exit(app.exec_())
+             
+
 
