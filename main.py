@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialog, QInputDialog, QGraphicsPolygonItem, QGraphicsLineItem,
     QFormLayout, QLineEdit, QSpinBox, QDialogButtonBox, QTextEdit, 
     QGraphicsSceneMouseEvent, QGraphicsSceneHoverEvent, QSizePolicy, QDockWidget,
-    QAbstractItemView, QTreeWidget, QTreeWidgetItem, QMenu # Añadidos para jerarquía y menú contextual
+    QAbstractItemView, QTreeWidget, QTreeWidgetItem, QMenu 
 )
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont, QPolygonF, 
                          QTransform, QDrag, QIcon, QPixmap, QFontMetrics, 
@@ -93,6 +93,7 @@ class DiagramItem(QGraphicsItem):
                 cloned_item.child_item_ids = list(self.child_item_ids) 
             else:
                 cloned_item.child_item_ids = []
+            cloned_item.setZValue(self.zValue()) 
         return cloned_item
 
 
@@ -102,7 +103,7 @@ class DiagramItem(QGraphicsItem):
             "id": getattr(self, 'id', None) if not for_clipboard else None, 
             "x": self.x(),
             "y": self.y(),
-            "z": self.zValue(), # Guardar Z-value
+            "z": self.zValue(), 
             "width": self.width,
             "height": self.height,
             "properties": self.properties.copy(), 
@@ -120,7 +121,7 @@ class DiagramItem(QGraphicsItem):
     def set_properties(self, data):
         if "x" in data and "y" in data: 
             self.setPos(data["x"], data["y"])
-        if "z" in data: # Cargar Z-value
+        if "z" in data: 
             self.setZValue(float(data["z"]))
         
         self.width = float(data.get("width", self.width)) 
@@ -159,6 +160,9 @@ class DiagramItem(QGraphicsItem):
 
     def update_appearance(self):
         self.update() 
+        if self.scene() and hasattr(self.scene(), 'parent') and self.scene().parent() and hasattr(self.scene().parent(), 'hierarchy_panel') and self.scene().parent().hierarchy_panel:
+            self.scene().parent().hierarchy_panel.update_item_text_in_tree(self)
+
 
     def boundingRect(self):
         handle_offset = float(self.resize_handle_size)
@@ -742,12 +746,12 @@ class Connector(QGraphicsItem):
         min_dist_sq = float('inf')
 
         for side in sides:
-            intersection_point = QPointF() # Necesario para Qt 5.15+
-            intersect_type = line_to_center.intersect(side, intersection_point) # Modificado
+            intersection_point = QPointF() 
+            intersect_type = line_to_center.intersect(side, intersection_point) 
             
             if intersect_type == QLineF.BoundedIntersection:
                 current_dist_line = QLineF(line_to_center.p1(), intersection_point)
-                current_dist_sq = current_dist_line.length() * current_dist_line.length() # CORRECCIÓN
+                current_dist_sq = current_dist_line.length() * current_dist_line.length() 
                 if current_dist_sq < min_dist_sq:
                     line_vec = line_to_center.unitVector()
                     p1_to_intersect_vec = intersection_point - line_to_center.p1()
@@ -1135,11 +1139,7 @@ class DiagramScene(QGraphicsScene):
 
         if self.parent() and hasattr(self.parent(), 'on_diagram_modified'):
             self.item_added.connect(lambda item: self.parent().on_diagram_modified(action_description=f"Añadir {getattr(item, 'item_type', 'elemento')}"))
-            self.item_removed.connect(
-                lambda item: self.parent().on_diagram_modified(
-                    action_description=f"Eliminar {getattr(item, 'item_type', type(item).__name__)}"
-                ) if isinstance(item, (DiagramItem, Connector)) else None
-            )
+            self.item_removed.connect(self.parent().handle_item_removed_for_history)
 
 
     def add_diagram_item(self, item_type_str, position: QPointF, item_data=None):
@@ -1663,7 +1663,7 @@ class ItemPalette(QListWidget):
             temp_item_instance.id = "palette_preview" 
 
             item_bound_rect = temp_item_instance.boundingRect()
-            if not item_bound_rect.isEmpty() and item_bound_rect.width() > 0 and item_bound_rect.height() > 0 :
+            if not item_bound_rect.isEmpty() and temp_item_instance.width > 0 and temp_item_instance.height > 0 : # CORRECCIÓN
                 preview_width = rect_area.width() * 0.9 
                 preview_height = rect_area.height() * 0.9
                 
@@ -1785,7 +1785,7 @@ class DiagramApp(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
 
 
-        top_h_layout.addWidget(self.view, 1) # Vista principal ocupa el espacio restante
+        top_h_layout.addWidget(self.view, 1) 
 
         main_v_layout.addLayout(top_h_layout) 
 
@@ -1908,7 +1908,7 @@ class DiagramApp(QMainWindow):
         self.toggle_grid_action.setChecked(self.scene.draw_grid)
         view_menu.addAction(self.toggle_grid_action)
         view_menu.addSeparator()
-        toggle_palette_action = self.palette_dock.toggleViewAction() # Acción para paleta
+        toggle_palette_action = self.palette_dock.toggleViewAction() 
         toggle_palette_action.setText("Mostrar/Ocultar Paleta")
         view_menu.addAction(toggle_palette_action)
         toggle_history_action = self.history_dock.toggleViewAction() 
@@ -2561,7 +2561,8 @@ class DiagramApp(QMainWindow):
             QMessageBox.warning(self, "Error al Exportar", f"No se pudo guardar la imagen en:\n{file_path}")
 
     def update_preview_panel_if_container(self, selected_item, is_selected):
-        # Este método está obsoleto ya que la vista previa se eliminó.
+        # Ya no se usa el panel de vista previa inferior para contenedores.
+        # La visualización del historial se maneja en la escena principal.
         pass
 
     def populate_preview_scene(self, container_item: ContainerItem):
@@ -2742,6 +2743,4 @@ if __name__ == '__main__':
     main_win = DiagramApp() 
     main_win.show()
     sys.exit(app.exec_())
-             
-
 
