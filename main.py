@@ -566,7 +566,11 @@ class DiagramApp(QMainWindow):
         item_to_edit = selected_items[0] 
         original_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True) 
         
-        self._capture_history_state(f"Inicio edición props de {item_to_edit.properties.get('text', item_to_edit.item_type)}")
+        if hasattr(item_to_edit, "properties"):
+            item_text = item_to_edit.properties.get('text', getattr(item_to_edit, 'item_type', type(item_to_edit).__name__))
+        else:
+            item_text = getattr(item_to_edit, 'text', type(item_to_edit).__name__)
+        self._capture_history_state(f"Inicio edición props de {item_text}")
 
         dialog_modified_item = False 
 
