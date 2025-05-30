@@ -5,13 +5,14 @@ import base64
 import time 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QGraphicsScene, QGraphicsView,
-    QGraphicsItem, QInputDialog, QLabel, 
+    QGraphicsItem, QInputDialog, QLabel,
     QListWidget, QHBoxLayout, QWidget, QVBoxLayout,
-    QPushButton, QDialog, 
-    QFormLayout, QLineEdit, QSpinBox, QDialogButtonBox, QTextEdit, 
+    QPushButton, QDialog,
+    QFormLayout, QLineEdit, QSpinBox, QDialogButtonBox, QTextEdit,
     QGraphicsSceneMouseEvent, QGraphicsSceneHoverEvent, QSizePolicy, QDockWidget,
     QTreeWidget, QTreeWidgetItem, QMenu, QAbstractItemView, QAction, QToolBar,
-    QMessageBox, QColorDialog, QFileDialog, QListWidgetItem
+    QMessageBox, QColorDialog, QFileDialog, QListWidgetItem,
+    QComboBox  # <--- ASEGÚRATE DE TENER ESTA LÍNEA
 )
 from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont, QPolygonF, 
                          QTransform, QDrag, QIcon, QPixmap, QFontMetrics, 
@@ -166,6 +167,171 @@ class DiagramApp(QMainWindow):
         self.new_file() 
         self.hierarchy_panel.update_tree() # Poblar árbol de jerarquía inicialmente
 
+
+# ... (dentro de la clase DiagramApp en main.py)
+
+    def edit_item_properties(self):
+        if self.is_viewing_history: return
+        selected_items = self.scene.selectedItems()
+        if not selected_items:
+            return
+
+        item_to_edit = selected_items[0]
+        # Guardamos una copia del estado original para comparar si hubo cambios
+        original_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
+
+        # Determinar una descripción del ítem para el historial
+        if hasattr(item_to_edit, "properties"): # Para DiagramItem
+            item_text_desc = item_to_edit.properties.get('text', getattr(item_to_edit, 'item_type', type(item_to_edit).__name__))
+        elif hasattr(item_to_edit, "text"): # Para Connector
+            item_text_desc = getattr(item_to_edit, 'text', type(item_to_edit).__name__)
+            if not item_text_desc and hasattr(item_to_edit, 'id'): # Connector might not have text, use ID
+                item_text_desc = f"Conector {item_to_edit.id or 'ID?'}"
+            else:
+                item_text_desc = item_text_desc or type(item_to_edit).__name__ # Si es "" usa el tipo
+        else:
+            item_text_desc = type(item_to_edit).__name__
+
+        self._capture_history_state(f"Inicio edición props de {item_text_desc}")
+
+        dialog_modified_item = False
+        self._temp_color_modified_dialog_flag = False # Reset flag
+
+        if isinstance(item_to_edit, ScriptItem):
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Propiedades de Script: {item_to_edit.properties.get('text', 'Script')}")
+            layout = QVBoxLayout(dialog)
+            label = QLabel("Script de Pintura (usa 'painter' y 'self'):")
+            layout.addWidget(label)
+            script_edit = QTextEdit()
+            script_edit.setPlainText(item_to_edit.properties.get("paint_script", ""))
+            script_edit.setFont(QFont("Courier New", 10))
+            script_edit.setMinimumHeight(200)
+            layout.addWidget(script_edit)
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            if dialog.exec_() == QDialog.Accepted:
+                new_script = script_edit.toPlainText()
+                if item_to_edit.properties.get("paint_script") != new_script:
+                    item_to_edit.properties["paint_script"] = new_script
+                    item_to_edit.update_appearance()
+                    dialog_modified_item = True
+        elif isinstance(item_to_edit, DiagramItem): # DiagramItem (excluyendo Connector que se maneja después)
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Propiedades de '{item_to_edit.properties.get('text', 'Ítem')}'")
+            form_layout = QFormLayout()
+            if "text" in item_to_edit.properties:
+                text_edit = QLineEdit(item_to_edit.properties["text"])
+                form_layout.addRow("Texto:", text_edit)
+            else: text_edit = None
+            fill_color_button = QPushButton(item_to_edit.properties.get("fill_color", "#ddeeff"))
+            fill_color_button.setStyleSheet(f"background-color: {fill_color_button.text()}; color: {self.get_text_color_for_bg(fill_color_button.text())}; border: 1px solid black;")
+            fill_color_button.clicked.connect(lambda: self.select_color_property_dialog(item_to_edit, "fill_color", fill_color_button))
+            form_layout.addRow("Color de Relleno:", fill_color_button)
+            border_color_button = QPushButton(item_to_edit.properties.get("border_color", "#000000"))
+            border_color_button.setStyleSheet(f"background-color: {border_color_button.text()}; color: {self.get_text_color_for_bg(border_color_button.text())}; border: 1px solid black;")
+            border_color_button.clicked.connect(lambda: self.select_color_property_dialog(item_to_edit, "border_color", border_color_button))
+            form_layout.addRow("Color de Borde:", border_color_button)
+            font_size_spin = QSpinBox()
+            font_size_spin.setRange(6, 72)
+            font_size_spin.setValue(item_to_edit.properties.get("font_size", 10))
+            form_layout.addRow("Tamaño de Fuente:", font_size_spin)
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            main_dialog_layout = QVBoxLayout(dialog)
+            main_dialog_layout.addLayout(form_layout)
+            main_dialog_layout.addWidget(button_box)
+
+            if dialog.exec_() == QDialog.Accepted:
+                if text_edit: item_to_edit.properties["text"] = text_edit.text()
+                item_to_edit.properties["font_size"] = font_size_spin.value()
+                # Es importante volver a serializar las propiedades DESPUÉS de que el diálogo de color (si se usó)
+                # haya tenido la oportunidad de modificar item_to_edit.properties directamente.
+                current_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
+                if original_props_json != current_props_json or self._temp_color_modified_dialog_flag:
+                    dialog_modified_item = True
+                if dialog_modified_item:
+                    item_to_edit.update_appearance()
+                    if isinstance(item_to_edit, TextItem): # Asumiendo que TextItem es una clase importada
+                        item_to_edit._adjust_size_to_text()
+                    else:
+                        item_to_edit.prepareGeometryChange() # General update
+        elif isinstance(item_to_edit, Connector): #
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Propiedades del Conector {item_to_edit.id or ''}") #
+            form_layout = QFormLayout()
+
+            text_edit_conn = QLineEdit(item_to_edit.text) #
+            form_layout.addRow("Texto:", text_edit_conn)
+
+            line_color_button = QPushButton(item_to_edit.line_color.name()) #
+            line_color_button.setStyleSheet(f"background-color: {line_color_button.text()}; color: {self.get_text_color_for_bg(line_color_button.text())}; border: 1px solid black;")
+            line_color_button.clicked.connect(lambda: self.select_connector_color_property_dialog(item_to_edit, "line_color", line_color_button))
+            form_layout.addRow("Color de Línea:", line_color_button)
+
+            line_width_spin = QSpinBox()
+            line_width_spin.setRange(1, 10)
+            line_width_spin.setValue(int(item_to_edit.line_width)) #
+            form_layout.addRow("Ancho de Línea:", line_width_spin)
+
+            font_size_conn_spin = QSpinBox()
+            font_size_conn_spin.setRange(6, 24)
+            font_size_conn_spin.setValue(item_to_edit.font_size) #
+            form_layout.addRow("Tamaño Fuente Texto:", font_size_conn_spin)
+
+            # ---- INICIO: ComboBox para Estilo de Conexión ----
+            style_combo = QComboBox()
+            style_combo.addItem("Diagonal", "diagonal")
+            style_combo.addItem("Ortogonal", "orthogonal")
+            # Sincronizar el ComboBox con el estilo actual del conector
+            current_style_index = style_combo.findData(item_to_edit.connection_style) #
+            if current_style_index != -1:
+                style_combo.setCurrentIndex(current_style_index)
+            else: # Si el estilo no se encuentra (p.ej. por un valor inválido), default a diagonal
+                style_combo.setCurrentIndex(style_combo.findData("diagonal"))
+            form_layout.addRow("Estilo de Conexión:", style_combo)
+            # ---- FIN: ComboBox para Estilo de Conexión ----
+
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+
+            main_dialog_layout = QVBoxLayout(dialog)
+            main_dialog_layout.addLayout(form_layout)
+            main_dialog_layout.addWidget(button_box)
+
+            if dialog.exec_() == QDialog.Accepted:
+                item_to_edit.text = text_edit_conn.text() #
+                item_to_edit.line_width = float(line_width_spin.value()) #
+                item_to_edit.font_size = font_size_conn_spin.value() #
+                item_to_edit.connection_style = style_combo.currentData() # Obtener el valor ("diagonal" u "orthogonal")
+
+                # Volver a serializar para verificar si hubo cambios reales
+                current_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
+                if original_props_json != current_props_json or self._temp_color_modified_dialog_flag:
+                    dialog_modified_item = True
+                if dialog_modified_item:
+                    item_to_edit.update_position() # Esto debería repintar el conector con el nuevo estilo
+
+        # Lógica final para manejar el historial y la modificación
+        if dialog_modified_item:
+            # Si hubo un cambio real, la entrada de "Inicio edición" es válida.
+            # Ahora registramos el estado final con una descripción de la acción.
+            self.on_diagram_modified(capture_state=False, action_description=f"Propiedades de {item_text_desc} cambiadas")
+        else:
+            # Si no hubo cambios reales después de que el diálogo se aceptó,
+            # y la última entrada del historial fue "Inicio edición...", la eliminamos.
+            if self._history_stack and self._history_current_index >= 0 and \
+            self._history_stack[self._history_current_index][1] == f"Inicio edición props de {item_text_desc}":
+                # Removemos la entrada "Inicio edición..." porque no hubo cambios netos.
+                self._history_stack.pop(self._history_current_index)
+                self._history_current_index -=1 # Ajustamos el índice actual
+            self._update_history_list_widget() # Actualizamos la lista del historial
+
+        self._temp_color_modified_dialog_flag = False # Restablecer para la próxima vez
 
     def _create_actions(self):
         self.new_action = QAction(QIcon.fromTheme("document-new", QIcon()), "Nuevo", self)
@@ -557,28 +723,41 @@ class DiagramApp(QMainWindow):
             self.scene.remove_selected()
             self.on_diagram_modified(capture_state=False) 
 
+
+    # ... (dentro de la clase DiagramApp en main.py)
+
     def edit_item_properties(self):
         if self.is_viewing_history: return
         selected_items = self.scene.selectedItems()
         if not selected_items:
             return
-        
-        item_to_edit = selected_items[0] 
-        original_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True) 
-        
-        if hasattr(item_to_edit, "properties"):
-            item_text = item_to_edit.properties.get('text', getattr(item_to_edit, 'item_type', type(item_to_edit).__name__))
-        else:
-            item_text = getattr(item_to_edit, 'text', type(item_to_edit).__name__)
-        self._capture_history_state(f"Inicio edición props de {item_text}")
 
-        dialog_modified_item = False 
+        item_to_edit = selected_items[0]
+        # Guardamos una copia del estado original para comparar si hubo cambios
+        original_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
+
+        # Determinar una descripción del ítem para el historial
+        if hasattr(item_to_edit, "properties"): # Para DiagramItem
+            item_text_desc = item_to_edit.properties.get('text', getattr(item_to_edit, 'item_type', type(item_to_edit).__name__))
+        elif hasattr(item_to_edit, "text"): # Para Connector
+            item_text_desc = getattr(item_to_edit, 'text', type(item_to_edit).__name__)
+            if not item_text_desc and hasattr(item_to_edit, 'id'): # Connector might not have text, use ID
+                item_text_desc = f"Conector {item_to_edit.id or 'ID?'}"
+            else:
+                item_text_desc = item_text_desc or type(item_to_edit).__name__ # Si es "" usa el tipo
+        else:
+            item_text_desc = type(item_to_edit).__name__
+
+        self._capture_history_state(f"Inicio edición props de {item_text_desc}")
+
+        dialog_modified_item = False
+        self._temp_color_modified_dialog_flag = False # Reset flag
 
         if isinstance(item_to_edit, ScriptItem):
             dialog = QDialog(self)
             dialog.setWindowTitle(f"Propiedades de Script: {item_to_edit.properties.get('text', 'Script')}")
             layout = QVBoxLayout(dialog)
-            label = QLabel("Script de Pintura (usa 'painter' y 'self'):") 
+            label = QLabel("Script de Pintura (usa 'painter' y 'self'):")
             layout.addWidget(label)
             script_edit = QTextEdit()
             script_edit.setPlainText(item_to_edit.properties.get("paint_script", ""))
@@ -595,10 +774,10 @@ class DiagramApp(QMainWindow):
                     item_to_edit.properties["paint_script"] = new_script
                     item_to_edit.update_appearance()
                     dialog_modified_item = True
-        elif isinstance(item_to_edit, DiagramItem): 
+        elif isinstance(item_to_edit, DiagramItem): # DiagramItem (excluyendo Connector que se maneja después)
             dialog = QDialog(self)
             dialog.setWindowTitle(f"Propiedades de '{item_to_edit.properties.get('text', 'Ítem')}'")
-            form_layout = QFormLayout() 
+            form_layout = QFormLayout()
             if "text" in item_to_edit.properties:
                 text_edit = QLineEdit(item_to_edit.properties["text"])
                 form_layout.addRow("Texto:", text_edit)
@@ -621,62 +800,94 @@ class DiagramApp(QMainWindow):
             main_dialog_layout = QVBoxLayout(dialog)
             main_dialog_layout.addLayout(form_layout)
             main_dialog_layout.addWidget(button_box)
-            self._temp_color_modified_dialog_flag = False 
+
             if dialog.exec_() == QDialog.Accepted:
                 if text_edit: item_to_edit.properties["text"] = text_edit.text()
                 item_to_edit.properties["font_size"] = font_size_spin.value()
+                # Es importante volver a serializar las propiedades DESPUÉS de que el diálogo de color (si se usó)
+                # haya tenido la oportunidad de modificar item_to_edit.properties directamente.
                 current_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
                 if original_props_json != current_props_json or self._temp_color_modified_dialog_flag:
                     dialog_modified_item = True
                 if dialog_modified_item:
                     item_to_edit.update_appearance()
-                    if isinstance(item_to_edit, TextItem): 
+                    if isinstance(item_to_edit, TextItem): # Asumiendo que TextItem es una clase importada
                         item_to_edit._adjust_size_to_text()
                     else:
-                        item_to_edit.prepareGeometryChange()
-        elif isinstance(item_to_edit, Connector):
+                        item_to_edit.prepareGeometryChange() # General update
+        elif isinstance(item_to_edit, Connector): #
             dialog = QDialog(self)
-            dialog.setWindowTitle("Propiedades del Conector")
+            dialog.setWindowTitle(f"Propiedades del Conector {item_to_edit.id or ''}") #
             form_layout = QFormLayout()
-            text_edit_conn = QLineEdit(item_to_edit.text)
+
+            text_edit_conn = QLineEdit(item_to_edit.text) #
             form_layout.addRow("Texto:", text_edit_conn)
-            line_color_button = QPushButton(item_to_edit.line_color.name())
+
+            line_color_button = QPushButton(item_to_edit.line_color.name()) #
             line_color_button.setStyleSheet(f"background-color: {line_color_button.text()}; color: {self.get_text_color_for_bg(line_color_button.text())}; border: 1px solid black;")
             line_color_button.clicked.connect(lambda: self.select_connector_color_property_dialog(item_to_edit, "line_color", line_color_button))
             form_layout.addRow("Color de Línea:", line_color_button)
+
             line_width_spin = QSpinBox()
             line_width_spin.setRange(1, 10)
-            line_width_spin.setValue(int(item_to_edit.line_width))
+            line_width_spin.setValue(int(item_to_edit.line_width)) #
             form_layout.addRow("Ancho de Línea:", line_width_spin)
+
             font_size_conn_spin = QSpinBox()
             font_size_conn_spin.setRange(6, 24)
-            font_size_conn_spin.setValue(item_to_edit.font_size)
+            font_size_conn_spin.setValue(item_to_edit.font_size) #
             form_layout.addRow("Tamaño Fuente Texto:", font_size_conn_spin)
+
+            # ---- INICIO: ComboBox para Estilo de Conexión ----
+            style_combo = QComboBox()
+            style_combo.addItem("Diagonal", "diagonal")
+            style_combo.addItem("Ortogonal", "orthogonal")
+            # Sincronizar el ComboBox con el estilo actual del conector
+            current_style_index = style_combo.findData(item_to_edit.connection_style) #
+            if current_style_index != -1:
+                style_combo.setCurrentIndex(current_style_index)
+            else: # Si el estilo no se encuentra (p.ej. por un valor inválido), default a diagonal
+                style_combo.setCurrentIndex(style_combo.findData("diagonal"))
+            form_layout.addRow("Estilo de Conexión:", style_combo)
+            # ---- FIN: ComboBox para Estilo de Conexión ----
+
             button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
             button_box.accepted.connect(dialog.accept)
             button_box.rejected.connect(dialog.reject)
+
             main_dialog_layout = QVBoxLayout(dialog)
             main_dialog_layout.addLayout(form_layout)
             main_dialog_layout.addWidget(button_box)
-            self._temp_color_modified_dialog_flag = False
+
             if dialog.exec_() == QDialog.Accepted:
-                item_to_edit.text = text_edit_conn.text()
-                item_to_edit.line_width = float(line_width_spin.value())
-                item_to_edit.font_size = font_size_conn_spin.value()
+                item_to_edit.text = text_edit_conn.text() #
+                item_to_edit.line_width = float(line_width_spin.value()) #
+                item_to_edit.font_size = font_size_conn_spin.value() #
+                item_to_edit.connection_style = style_combo.currentData() # Obtener el valor ("diagonal" u "orthogonal")
+
+                # Volver a serializar para verificar si hubo cambios reales
                 current_props_json = json.dumps(item_to_edit.get_properties(), sort_keys=True)
                 if original_props_json != current_props_json or self._temp_color_modified_dialog_flag:
-                     dialog_modified_item = True
+                    dialog_modified_item = True
                 if dialog_modified_item:
-                    item_to_edit.update_position() 
-        
+                    item_to_edit.update_position() # Esto debería repintar el conector con el nuevo estilo
+
+        # Lógica final para manejar el historial y la modificación
         if dialog_modified_item:
-            self.on_diagram_modified(capture_state=False, action_description=f"Propiedades de {getattr(item_to_edit, 'id', 'item')} cambiadas") 
-        else: 
-            if self._history_stack: self._history_stack.pop() 
-            self._update_history_list_widget() 
+            # Si hubo un cambio real, la entrada de "Inicio edición" es válida.
+            # Ahora registramos el estado final con una descripción de la acción.
+            self.on_diagram_modified(capture_state=False, action_description=f"Propiedades de {item_text_desc} cambiadas")
+        else:
+            # Si no hubo cambios reales después de que el diálogo se aceptó,
+            # y la última entrada del historial fue "Inicio edición...", la eliminamos.
+            if self._history_stack and self._history_current_index >= 0 and \
+            self._history_stack[self._history_current_index][1] == f"Inicio edición props de {item_text_desc}":
+                # Removemos la entrada "Inicio edición..." porque no hubo cambios netos.
+                self._history_stack.pop(self._history_current_index)
+                self._history_current_index -=1 # Ajustamos el índice actual
+            self._update_history_list_widget() # Actualizamos la lista del historial
 
-        self._temp_color_modified_dialog_flag = False 
-
+        self._temp_color_modified_dialog_flag = False # Restablecer para la próxima vez
 
     _temp_color_modified_dialog_flag = False 
 

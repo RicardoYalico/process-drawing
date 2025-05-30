@@ -19,8 +19,8 @@ from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont, QPolygonF,
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QSizeF, QMimeData, 
                           pyqtSignal, QSize, QLineF, QFileInfo, QBuffer, QIODevice)
 
+from core.constants import ITEM_SCRIPT
 from core.diagram_item_base import DiagramItem
-from demo import ITEM_SCRIPT 
 
 class ScriptItem(DiagramItem):
     def __init__(self, parent=None):

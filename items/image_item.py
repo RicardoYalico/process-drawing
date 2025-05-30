@@ -20,8 +20,8 @@ from PyQt5.QtGui import (QPainter, QPen, QBrush, QColor, QFont, QPolygonF,
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QSizeF, QMimeData, 
                           pyqtSignal, QSize, QLineF, QFileInfo, QBuffer, QIODevice)
 
+from core.constants import ITEM_IMAGE
 from core.diagram_item_base import DiagramItem
-from demo import ITEM_IMAGE 
 
 class ImageItem(DiagramItem):
     def __init__(self, image_path=None, parent=None):
