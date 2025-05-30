@@ -1,7 +1,7 @@
 # Importar todas as constantes de tipo desde core.constants
 from core.constants import ( # CORREXIDO: Importación absoluta
     ITEM_RECTANGLE, ITEM_ELLIPSE, ITEM_DIAMOND, ITEM_TEXT,
-    ITEM_CONTAINER, ITEM_IMAGE, ITEM_SCRIPT, ITEM_PERSONA
+    ITEM_CONTAINER, ITEM_IMAGE, ITEM_SCRIPT, ITEM_PERSONA, ITEM_C4_PERSONA
 )
 
 # Importar todas as clases de ítems específicos
@@ -13,6 +13,7 @@ from .container_item import ContainerItem
 from .image_item import ImageItem
 from .script_item import ScriptItem
 from .persona_item import PersonaItem
+from .c4persona_item import C4PersonaItem # Importación relativa dentro do paquete items
 # from demo import RedCircleItem # Exemplo se demo.py está no nivel superior
 
 AVAILABLE_ITEM_TYPES = {
@@ -24,6 +25,7 @@ AVAILABLE_ITEM_TYPES = {
     ITEM_IMAGE:     {"class": ImageItem,     "icon_char": "🖼️", "name": "Imagen (Importar)"}, 
     ITEM_SCRIPT:    {"class": ScriptItem,    "icon_char": "📜", "name": "Script"},
     ITEM_PERSONA:   {"class": PersonaItem,   "icon_char": "👤", "name": "Persona"}, 
+    ITEM_C4_PERSONA: {"class": C4PersonaItem, "icon_char": "👥", "name": "Persona C4"}
     # Se se integra demo.py:
     # from demo import ITEM_RED_CIRCLE, RedCircleItem 
     # ITEM_RED_CIRCLE: {"class": RedCircleItem, "icon_char": "🔴", "name": "Círculo Vermello Demo"},
@@ -32,5 +34,6 @@ AVAILABLE_ITEM_TYPES = {
 __all__ = [
     "RectangleItem", "EllipseItem", "DiamondItem", "TextItem", 
     "ContainerItem", "ImageItem", "ScriptItem", "PersonaItem",
+    "C4PersonaItem",
     "AVAILABLE_ITEM_TYPES"
 ]

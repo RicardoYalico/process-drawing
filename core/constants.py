@@ -9,6 +9,7 @@ ITEM_CONTAINER = "container"
 ITEM_IMAGE = "image"
 ITEM_SCRIPT = "script"
 ITEM_PERSONA = "persona"
+ITEM_C4_PERSONA = "c4_persona"
 USER_IMAGE_PREFIX = "user_image_"
 
 # Acciones de Capas (para el orden Z)
