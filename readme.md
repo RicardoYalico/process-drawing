@@ -190,7 +190,7 @@ process-drawing/
 
 ## 📜 Licencia
 
-Este proyecto se distribuye bajo la Licencia MIT (o la que prefieras). Por favor, revisa el archivo `LICENSE` para más detalles (deberías añadir uno si aún no existe).
+Este proyecto se distribuye bajo la Licencia MIT (o la que prefieras). Por favor, revisa el archivo `LICENSE` para más detalles.
 
 ---
 
